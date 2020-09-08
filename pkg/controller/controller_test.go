@@ -61,6 +61,19 @@ func Test_objectMeta(t *testing.T) {
 				Name:      "deployment",
 			},
 		},
+		{
+			name: "StatefulSet",
+			obj: &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "statefulset",
+					Namespace: "test",
+				},
+			},
+			want: metav1.ObjectMeta{
+				Namespace: "test",
+				Name:      "statefulset",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
