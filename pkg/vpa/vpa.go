@@ -36,6 +36,11 @@ import (
 	"k8s.io/klog"
 )
 
+type workload struct {
+	metav1.TypeMeta
+	metav1.ObjectMeta
+}
+
 // Reconciler checks if VPA objects should be created or deleted
 type Reconciler struct {
 	KubeClient        *kube.ClientInstance
@@ -85,13 +90,14 @@ func (r Reconciler) ReconcileNamespace(namespace *corev1.Namespace) error {
 		return r.cleanUpManagedVPAsInNamespace(nsName, vpas)
 	}
 
-	deployments, err := r.listDeployments(nsName)
+	workloads, err := r.listWorkloads(nsName)
+
 	if err != nil {
 		klog.Error(err.Error())
 		return err
 	}
 
-	return r.reconcileDeploymentsAndVPAs(namespace, vpas, deployments)
+	return r.reconcileWorkloadsAndVPAs(namespace, vpas, workloads)
 }
 
 func (r Reconciler) cleanUpManagedVPAsInNamespace(namespace string, vpas []vpav1.VerticalPodAutoscaler) error {
@@ -152,29 +158,29 @@ func (r Reconciler) namespaceIsManaged(namespace *corev1.Namespace) bool {
 	return r.OnByDefault
 }
 
-func (r Reconciler) reconcileDeploymentsAndVPAs(ns *corev1.Namespace, vpas []vpav1.VerticalPodAutoscaler, deployments []appsv1.Deployment) error {
+func (r Reconciler) reconcileWorkloadsAndVPAs(ns *corev1.Namespace, vpas []vpav1.VerticalPodAutoscaler, workloads []workload) error {
 	defaultUpdateMode, _ := vpaUpdateModeForResource(ns)
 	// these keys will eventually contain the leftover vpas that do not have a matching deployment associated
 	vpaHasAssociatedDeployment := map[string]bool{}
-	for _, deployment := range deployments {
-		var dvpa *vpav1.VerticalPodAutoscaler
+	for _, workload := range workloads {
+		var wvpa *vpav1.VerticalPodAutoscaler
 		// search for the matching vpa (will have the same name)
 		for idx, vpa := range vpas {
-			if deployment.Name == vpa.Name {
+			if workload.Name == vpa.Name && workload.Kind == vpa.Spec.TargetRef.Kind && workload.APIVersion == vpa.Spec.TargetRef.APIVersion {
 				// found the vpa associated with this deployment
-				dvpa = &vpas[idx]
-				vpaHasAssociatedDeployment[dvpa.Name] = true
+				wvpa = &vpas[idx]
+				vpaHasAssociatedDeployment[wvpa.Name] = true
 				break
 			}
 		}
 
 		// for logging
 		vpaName := "none"
-		if dvpa != nil {
-			vpaName = dvpa.Name
+		if wvpa != nil {
+			vpaName = wvpa.Name
 		}
-		klog.V(2).Infof("Reconciling Namespace/%s for Deployment/%s with VPA/%s", ns.Name, deployment.Name, vpaName)
-		err := r.reconcileDeploymentAndVPA(ns, deployment, dvpa, defaultUpdateMode)
+		klog.V(2).Infof("Reconciling Namespace/%s for Deployment/%s with VPA/%s", ns.Name, workload.Name, vpaName)
+		err := r.reconcileWorkloadAndVPA(ns, workload, wvpa, defaultUpdateMode)
 		if err != nil {
 			return err
 		}
@@ -194,15 +200,15 @@ func (r Reconciler) reconcileDeploymentsAndVPAs(ns *corev1.Namespace, vpas []vpa
 	return nil
 }
 
-func (r Reconciler) reconcileDeploymentAndVPA(ns *corev1.Namespace, deployment appsv1.Deployment, vpa *vpav1.VerticalPodAutoscaler, vpaUpdateMode *vpav1.UpdateMode) error {
-	desiredVPA := r.getVPAObject(vpa, ns, deployment.Name, vpaUpdateMode)
+func (r Reconciler) reconcileWorkloadAndVPA(ns *corev1.Namespace, workload workload, vpa *vpav1.VerticalPodAutoscaler, vpaUpdateMode *vpav1.UpdateMode) error {
+	desiredVPA := r.getWorkloadVPAObject(vpa, workload, ns, workload.Name, vpaUpdateMode)
 
-	if vpaUpdateModeOverride, explicit := vpaUpdateModeForResource(&deployment); explicit {
+	if vpaUpdateModeOverride, explicit := vpaUpdateModeForWorkload(workload); explicit {
 		vpaUpdateMode = vpaUpdateModeOverride
-		klog.V(5).Infof("Deployment/%s has custom vpa-update-mode=%s", deployment.Name, *vpaUpdateMode)
+		klog.V(5).Infof("%s/%s has custom vpa-update-mode=%s", workload.GetObjectKind(), workload.Name, *vpaUpdateMode)
 	}
 	if vpa == nil {
-		klog.V(5).Infof("Deployment/%s does not have a VPA currently, creating VPA/%s", deployment.Name, deployment.Name)
+		klog.V(5).Infof("%s/%s does not have a VPA currently, creating VPA/%s", workload.GetObjectKind(), workload.Name, workload.Name)
 		// no vpa exists, create one (use the same name as the deployment)
 		err := r.createVPA(desiredVPA)
 		if err != nil {
@@ -210,7 +216,7 @@ func (r Reconciler) reconcileDeploymentAndVPA(ns *corev1.Namespace, deployment a
 		}
 	} else {
 		// vpa exists
-		klog.V(5).Infof("Deployment/%s has a VPA currently, updating VPA/%s", deployment.Name, deployment.Name)
+		klog.V(5).Infof("%s/%s has a VPA currently, updating VPA/%s", workload.GetObjectKind(), workload.Name, workload.Name)
 		err := r.updateVPA(desiredVPA)
 		if err != nil {
 			return err
@@ -218,6 +224,26 @@ func (r Reconciler) reconcileDeploymentAndVPA(ns *corev1.Namespace, deployment a
 	}
 
 	return nil
+}
+
+func (r Reconciler) listWorkloads(namespace string) ([]workload, error) {
+	deployments, err := r.listDeployments(namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	workloads := make([]workload, 0, len(deployments))
+
+	for _, deployment := range deployments {
+		workloads = append(
+			workloads,
+			workload{
+				TypeMeta:   deployment.TypeMeta,
+				ObjectMeta: deployment.ObjectMeta,
+			})
+	}
+
+	return workloads, nil
 }
 
 func (r Reconciler) listDeployments(namespace string) ([]appsv1.Deployment, error) {
@@ -342,6 +368,40 @@ func (r Reconciler) getVPAObject(existingVPA *vpav1.VerticalPodAutoscaler, ns *c
 	return desiredVPA
 }
 
+func (r Reconciler) getWorkloadVPAObject(existingVPA *vpav1.VerticalPodAutoscaler, wl workload, ns *corev1.Namespace, vpaName string, updateMode *vpav1.UpdateMode) vpav1.VerticalPodAutoscaler {
+	var desiredVPA vpav1.VerticalPodAutoscaler
+
+	// create a brand new vpa with the correct information
+	if existingVPA == nil {
+		desiredVPA = vpav1.VerticalPodAutoscaler{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      vpaName,
+				Namespace: ns.Name,
+			},
+		}
+	} else {
+		// or use the existing VPA as a template to update from
+		desiredVPA = *existingVPA
+	}
+
+	// update the labels on the VPA
+	desiredVPA.Labels = utils.VPALabels
+
+	// update the spec on the VPA
+	desiredVPA.Spec = vpav1.VerticalPodAutoscalerSpec{
+		TargetRef: &autoscaling.CrossVersionObjectReference{
+			APIVersion: wl.APIVersion,
+			Kind:       wl.Kind,
+			Name:       vpaName,
+		},
+		UpdatePolicy: &vpav1.PodUpdatePolicy{
+			UpdateMode: updateMode,
+		},
+	}
+
+	return desiredVPA
+}
+
 // vpaUpdateModeForResource searches the resource's annotations and labels for a vpa-update-mode
 // key/value and uses that key/value to return the proper UpdateMode type
 func vpaUpdateModeForResource(obj runtime.Object) (*vpav1.UpdateMode, bool) {
@@ -353,6 +413,27 @@ func vpaUpdateModeForResource(obj runtime.Object) (*vpav1.UpdateMode, bool) {
 	if val, ok := accessor.GetAnnotations()[utils.VpaUpdateModeKey]; ok {
 		requestStr = val
 	} else if val, ok := accessor.GetLabels()[utils.VpaUpdateModeKey]; ok {
+		requestStr = val
+	}
+	if requestStr != "" {
+		requestStr = strings.ToUpper(requestStr[0:1]) + strings.ToLower(requestStr[1:])
+		requestedVPAMode = vpav1.UpdateMode(requestStr)
+		explicit = true
+	}
+
+	return &requestedVPAMode, explicit
+}
+
+// vpaUpdateModeForWorkload searches the workloads's annotations and labels for a vpa-update-mode
+// key/value and uses that key/value to return the proper UpdateMode type
+func vpaUpdateModeForWorkload(wl workload) (*vpav1.UpdateMode, bool) {
+	requestedVPAMode := vpav1.UpdateModeOff
+	explicit := false
+
+	requestStr := ""
+	if val, ok := wl.GetAnnotations()[utils.VpaUpdateModeKey]; ok {
+		requestStr = val
+	} else if val, ok := wl.GetLabels()[utils.VpaUpdateModeKey]; ok {
 		requestStr = val
 	}
 	if requestStr != "" {
