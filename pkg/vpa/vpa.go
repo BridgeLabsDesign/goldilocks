@@ -16,6 +16,7 @@ package vpa
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -39,6 +40,12 @@ import (
 type workload struct {
 	metav1.TypeMeta
 	metav1.ObjectMeta
+}
+
+// VPAName produces a VPA name base on the workload name and kind
+// <workload-name>-<workload-kind>
+func (w workload) VPAName() string {
+	return fmt.Sprintf("%s-%s", w.Name, strings.ToLower(w.TypeMeta.Kind))
 }
 
 // Reconciler checks if VPA objects should be created or deleted
@@ -163,23 +170,22 @@ func (r Reconciler) reconcileWorkloadsAndVPAs(ns *corev1.Namespace, vpas []vpav1
 	// these keys will eventually contain the leftover vpas that do not have a matching deployment associated
 	vpaHasAssociatedDeployment := map[string]bool{}
 	for _, workload := range workloads {
+		vpaName := workload.VPAName()
 		var wvpa *vpav1.VerticalPodAutoscaler
-		// search for the matching vpa (will have the same name)
+		// search for the matching vpa (will have the <workload name>-<workload-type>)
 		for idx, vpa := range vpas {
-			if workload.Name == vpa.Name && workload.Kind == vpa.Spec.TargetRef.Kind && workload.APIVersion == vpa.Spec.TargetRef.APIVersion {
-				// found the vpa associated with this deployment
+			if vpaName == vpa.Name && workload.Kind == vpa.Spec.TargetRef.Kind && workload.APIVersion == vpa.Spec.TargetRef.APIVersion {
+				// found the vpa associated with this workload
 				wvpa = &vpas[idx]
 				vpaHasAssociatedDeployment[wvpa.Name] = true
 				break
 			}
 		}
 
-		// for logging
-		vpaName := "none"
 		if wvpa != nil {
 			vpaName = wvpa.Name
 		}
-		klog.V(2).Infof("Reconciling Namespace/%s for Deployment/%s with VPA/%s", ns.Name, workload.Name, vpaName)
+		klog.V(2).Infof("Reconciling Namespace/%s for %s/%s with VPA/%s", ns.Name, workload.Kind, workload.Name, vpaName)
 		err := r.reconcileWorkloadAndVPA(ns, workload, wvpa, defaultUpdateMode)
 		if err != nil {
 			return err
@@ -201,7 +207,8 @@ func (r Reconciler) reconcileWorkloadsAndVPAs(ns *corev1.Namespace, vpas []vpav1
 }
 
 func (r Reconciler) reconcileWorkloadAndVPA(ns *corev1.Namespace, workload workload, vpa *vpav1.VerticalPodAutoscaler, vpaUpdateMode *vpav1.UpdateMode) error {
-	desiredVPA := r.getWorkloadVPAObject(vpa, workload, ns, workload.Name, vpaUpdateMode)
+	vpaName := workloadVPAName(workload)
+	desiredVPA := r.getWorkloadVPAObject(vpa, workload, ns, vpaName, vpaUpdateMode)
 
 	if vpaUpdateModeOverride, explicit := vpaUpdateModeForWorkload(workload); explicit {
 		vpaUpdateMode = vpaUpdateModeOverride
@@ -370,6 +377,7 @@ func (r Reconciler) getVPAObject(existingVPA *vpav1.VerticalPodAutoscaler, ns *c
 
 func (r Reconciler) getWorkloadVPAObject(existingVPA *vpav1.VerticalPodAutoscaler, wl workload, ns *corev1.Namespace, vpaName string, updateMode *vpav1.UpdateMode) vpav1.VerticalPodAutoscaler {
 	var desiredVPA vpav1.VerticalPodAutoscaler
+	vpaName := wl.VPAName()
 
 	// create a brand new vpa with the correct information
 	if existingVPA == nil {
@@ -392,7 +400,7 @@ func (r Reconciler) getWorkloadVPAObject(existingVPA *vpav1.VerticalPodAutoscale
 		TargetRef: &autoscaling.CrossVersionObjectReference{
 			APIVersion: wl.APIVersion,
 			Kind:       wl.Kind,
-			Name:       vpaName,
+			Name:       wl.Name,
 		},
 		UpdatePolicy: &vpav1.PodUpdatePolicy{
 			UpdateMode: updateMode,
