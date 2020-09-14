@@ -182,9 +182,6 @@ func (r Reconciler) reconcileWorkloadsAndVPAs(ns *corev1.Namespace, vpas []vpav1
 			}
 		}
 
-		if wvpa != nil {
-			vpaName = wvpa.Name
-		}
 		klog.V(2).Infof("Reconciling Namespace/%s for %s/%s with VPA/%s", ns.Name, workload.Kind, workload.Name, vpaName)
 		err := r.reconcileWorkloadAndVPA(ns, workload, wvpa, defaultUpdateMode)
 		if err != nil {
@@ -207,8 +204,7 @@ func (r Reconciler) reconcileWorkloadsAndVPAs(ns *corev1.Namespace, vpas []vpav1
 }
 
 func (r Reconciler) reconcileWorkloadAndVPA(ns *corev1.Namespace, workload workload, vpa *vpav1.VerticalPodAutoscaler, vpaUpdateMode *vpav1.UpdateMode) error {
-	vpaName := workloadVPAName(workload)
-	desiredVPA := r.getWorkloadVPAObject(vpa, workload, ns, vpaName, vpaUpdateMode)
+	desiredVPA := r.getWorkloadVPAObject(vpa, workload, ns, vpaUpdateMode)
 
 	if vpaUpdateModeOverride, explicit := vpaUpdateModeForWorkload(workload); explicit {
 		vpaUpdateMode = vpaUpdateModeOverride
@@ -216,7 +212,7 @@ func (r Reconciler) reconcileWorkloadAndVPA(ns *corev1.Namespace, workload workl
 	}
 	if vpa == nil {
 		klog.V(5).Infof("%s/%s does not have a VPA currently, creating VPA/%s", workload.GetObjectKind(), workload.Name, workload.Name)
-		// no vpa exists, create one (use the same name as the deployment)
+		// no vpa exists, create one
 		err := r.createVPA(desiredVPA)
 		if err != nil {
 			return err
@@ -375,7 +371,7 @@ func (r Reconciler) getVPAObject(existingVPA *vpav1.VerticalPodAutoscaler, ns *c
 	return desiredVPA
 }
 
-func (r Reconciler) getWorkloadVPAObject(existingVPA *vpav1.VerticalPodAutoscaler, wl workload, ns *corev1.Namespace, vpaName string, updateMode *vpav1.UpdateMode) vpav1.VerticalPodAutoscaler {
+func (r Reconciler) getWorkloadVPAObject(existingVPA *vpav1.VerticalPodAutoscaler, wl workload, ns *corev1.Namespace, updateMode *vpav1.UpdateMode) vpav1.VerticalPodAutoscaler {
 	var desiredVPA vpav1.VerticalPodAutoscaler
 	vpaName := wl.VPAName()
 
