@@ -88,6 +88,16 @@ var testDeployment = &appsv1.Deployment{
 	},
 }
 
+var testStatefulSet = &appsv1.StatefulSet{
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "test-deploy",
+	},
+	TypeMeta: metav1.TypeMeta{
+		Kind:       "StatefulSet",
+		APIVersion: "apps/v1",
+	},
+}
+
 var testDeploymentExcluded = &appsv1.Deployment{
 	ObjectMeta: metav1.ObjectMeta{
 		Name: "test-deploy",

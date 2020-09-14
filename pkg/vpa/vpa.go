@@ -230,12 +230,22 @@ func (r Reconciler) reconcileWorkloadAndVPA(ns *corev1.Namespace, workload workl
 }
 
 func (r Reconciler) listWorkloads(namespace string) ([]workload, error) {
+	workloadLen := 0
 	deployments, err := r.listDeployments(namespace)
 	if err != nil {
 		return nil, err
 	}
 
-	workloads := make([]workload, 0, len(deployments))
+	workloadLen += len(deployments)
+
+	statefulSets, err := r.listStatefulSets(namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	workloadLen += len(statefulSets)
+
+	workloads := make([]workload, 0, workloadLen)
 
 	for _, deployment := range deployments {
 		workloads = append(
@@ -243,6 +253,15 @@ func (r Reconciler) listWorkloads(namespace string) ([]workload, error) {
 			workload{
 				TypeMeta:   deployment.TypeMeta,
 				ObjectMeta: deployment.ObjectMeta,
+			})
+	}
+
+	for _, statefulset := range statefulSets {
+		workloads = append(
+			workloads,
+			workload{
+				TypeMeta:   statefulset.TypeMeta,
+				ObjectMeta: statefulset.ObjectMeta,
 			})
 	}
 
@@ -263,6 +282,22 @@ func (r Reconciler) listDeployments(namespace string) ([]appsv1.Deployment, erro
 	}
 
 	return deployments.Items, nil
+}
+
+func (r Reconciler) listStatefulSets(namespace string) ([]appsv1.StatefulSet, error) {
+	statefulsets, err := r.KubeClient.Client.AppsV1().StatefulSets(namespace).List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	klog.V(2).Infof("There are %d statefulsets in Namespace/%s", len(statefulsets.Items), namespace)
+	if klog.V(9) {
+		for _, d := range statefulsets.Items {
+			klog.V(9).Infof("Found StatefulSet/%s in Namespace/%s", d.Name, namespace)
+		}
+	}
+
+	return statefulsets.Items, nil
 }
 
 func (r Reconciler) listVPAs(namespace string) ([]vpav1.VerticalPodAutoscaler, error) {
