@@ -142,41 +142,34 @@ func Test_getWorkloadVPAObject(t *testing.T) {
 		updateMode vpav1.UpdateMode
 		wl         workload
 		vpa        *vpav1.VerticalPodAutoscaler
+		vpaName    string
 	}{
 		{
 			name: "deployment-no-vpa",
 			ns:   nsLabeledTrueUpdateModeOff,
 			wl: workload{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-workload",
-				},
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "Deployment",
-					APIVersion: "apps/v1",
-				},
+				ObjectMeta: testDeployment.ObjectMeta,
+				TypeMeta:   testDeployment.TypeMeta,
 			},
 			updateMode: vpav1.UpdateModeOff,
 			vpa:        nil,
+			vpaName:    "test-deploy-deployment",
 		},
 		{
 			name: "deployment-existing-vpa",
 			ns:   nsLabeledTrueUpdateModeOff,
 			wl: workload{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-workload",
-				},
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "Deployment",
-					APIVersion: "apps/v1",
-				},
+				ObjectMeta: testDeployment.ObjectMeta,
+				TypeMeta:   testDeployment.TypeMeta,
 			},
 			updateMode: vpav1.UpdateModeOff,
 			vpa: &vpav1.VerticalPodAutoscaler{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-workload",
+					Name:      "test-deploy-deployment",
 					Namespace: nsLabeledTrueUpdateModeOff.Name,
 				},
 			},
+			vpaName: "test-deploy-deployment",
 		},
 	}
 
@@ -185,17 +178,17 @@ func Test_getWorkloadVPAObject(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			mode, _ := vpaUpdateModeForResource(test.ns)
-			vpa := rec.getWorkloadVPAObject(test.vpa, test.wl, test.ns, test.wl.ObjectMeta.Name, mode)
+			vpa := rec.getWorkloadVPAObject(test.vpa, test.wl, test.ns, mode)
 
 			// expected ObjectMeta
-			assert.Equal(t, test.wl.ObjectMeta.Name, vpa.Name)
+			assert.Equal(t, test.vpaName, vpa.Name)
 			assert.Equal(t, test.ns.Name, vpa.Namespace)
 			assert.Equal(t, test.wl.TypeMeta.APIVersion, vpa.Spec.TargetRef.APIVersion)
 			assert.Equal(t, test.wl.TypeMeta.Kind, vpa.Spec.TargetRef.Kind)
 
 			// expected .spec.target
 			// workload target matches the vpa name
-			assert.Equal(t, vpa.Name, vpa.Spec.TargetRef.Name)
+			assert.Equal(t, test.wl.Name, vpa.Spec.TargetRef.Name)
 			// workload target matches the expected API Version and Kind
 			assert.Equal(t, test.wl.TypeMeta.APIVersion, vpa.Spec.TargetRef.APIVersion)
 			assert.Equal(t, test.wl.TypeMeta.Kind, vpa.Spec.TargetRef.Kind)
@@ -508,14 +501,18 @@ func Test_ReconcileNamespaceWithLabels(t *testing.T) {
 	_, err = KubeClient.Client.AppsV1().Deployments(nsName).Create(context.TODO(), testDeployment, metav1.CreateOptions{})
 	assert.NoError(t, err)
 
-	// This should create a single VPA
+	_, err = KubeClient.Client.AppsV1().StatefulSets(nsName).Create(context.TODO(), testStatefulSet, metav1.CreateOptions{})
+	assert.NoError(t, err)
+
+	// This should create a 2 VPAs
 	err = GetInstance().ReconcileNamespace(nsLabeledTrue)
 	assert.NoError(t, err)
 
 	vpaList, err := VPAClient.Client.AutoscalingV1().VerticalPodAutoscalers(nsName).List(context.TODO(), metav1.ListOptions{})
 	assert.NoError(t, err)
-	assert.Equal(t, 1, len(vpaList.Items))
-	assert.Equal(t, "test-deploy", vpaList.Items[0].ObjectMeta.Name)
+	assert.Equal(t, 2, len(vpaList.Items))
+	assert.Equal(t, "test-deploy-deployment", vpaList.Items[0].ObjectMeta.Name)
+	assert.Equal(t, "test-deploy-statefulset", vpaList.Items[1].ObjectMeta.Name)
 }
 
 func Test_ReconcileNamespaceDeleteDeployment(t *testing.T) {

@@ -40,6 +40,8 @@ func OnUpdate(obj interface{}, event utils.Event) {
 		OnDeploymentChanged(obj.(*appsv1.Deployment), event)
 	case *corev1.Namespace:
 		OnNamespaceChanged(obj.(*corev1.Namespace), event)
+	case *appsv1.StatefulSet:
+		OnStatefulSetChanged(obj.(*appsv1.StatefulSet), event)
 	default:
 		klog.Errorf("Object has unknown type of %T", t)
 	}
@@ -52,6 +54,8 @@ func onDelete(event utils.Event) {
 		OnNamespaceChanged(&corev1.Namespace{}, event)
 	case "deployment":
 		OnDeploymentChanged(&appsv1.Deployment{}, event)
+	case "statefulset":
+		OnStatefulSetChanged(&appsv1.StatefulSet{}, event)
 	default:
 		klog.Errorf("object has unknown resource type %s", event.ResourceType)
 	}
