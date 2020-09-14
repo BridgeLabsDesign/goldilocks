@@ -132,6 +132,82 @@ func Test_getVPAObject(t *testing.T) {
 	}
 }
 
+func Test_getWorkloadVPAObject(t *testing.T) {
+	setupVPAForTests()
+	rec := GetInstance()
+
+	tests := []struct {
+		name       string
+		ns         *corev1.Namespace
+		updateMode vpav1.UpdateMode
+		wl         workload
+		vpa        *vpav1.VerticalPodAutoscaler
+	}{
+		{
+			name: "deployment-no-vpa",
+			ns:   nsLabeledTrueUpdateModeOff,
+			wl: workload{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-workload",
+				},
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "Deployment",
+					APIVersion: "apps/v1",
+				},
+			},
+			updateMode: vpav1.UpdateModeOff,
+			vpa:        nil,
+		},
+		{
+			name: "deployment-existing-vpa",
+			ns:   nsLabeledTrueUpdateModeOff,
+			wl: workload{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-workload",
+				},
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "Deployment",
+					APIVersion: "apps/v1",
+				},
+			},
+			updateMode: vpav1.UpdateModeOff,
+			vpa: &vpav1.VerticalPodAutoscaler{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workload",
+					Namespace: nsLabeledTrueUpdateModeOff.Name,
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			mode, _ := vpaUpdateModeForResource(test.ns)
+			vpa := rec.getWorkloadVPAObject(test.vpa, test.wl, test.ns, test.wl.ObjectMeta.Name, mode)
+
+			// expected ObjectMeta
+			assert.Equal(t, test.wl.ObjectMeta.Name, vpa.Name)
+			assert.Equal(t, test.ns.Name, vpa.Namespace)
+			assert.Equal(t, test.wl.TypeMeta.APIVersion, vpa.Spec.TargetRef.APIVersion)
+			assert.Equal(t, test.wl.TypeMeta.Kind, vpa.Spec.TargetRef.Kind)
+
+			// expected .spec.target
+			// workload target matches the vpa name
+			assert.Equal(t, vpa.Name, vpa.Spec.TargetRef.Name)
+			// workload target matches the expected API Version and Kind
+			assert.Equal(t, test.wl.TypeMeta.APIVersion, vpa.Spec.TargetRef.APIVersion)
+			assert.Equal(t, test.wl.TypeMeta.Kind, vpa.Spec.TargetRef.Kind)
+
+			// labels are set correctly
+			assert.Equal(t, utils.VPALabels, vpa.Labels)
+			// update mode is correct for the namespace
+			assert.Equal(t, test.updateMode, *vpa.Spec.UpdatePolicy.UpdateMode)
+		})
+	}
+}
+
 func Test_createVPA(t *testing.T) {
 	setupVPAForTests()
 	VPAClient := GetInstance().VPAClient
