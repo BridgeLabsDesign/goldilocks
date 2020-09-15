@@ -16,6 +16,7 @@ package summary
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -39,13 +40,14 @@ type Summary struct {
 }
 
 type namespaceSummary struct {
-	Namespace   string                       `json:"namespace"`
-	Deployments map[string]deploymentSummary `json:"deployments"`
+	Namespace string                     `json:"namespace"`
+	Workloads map[string]workloadSummary `json:"workloads"`
 }
 
-type deploymentSummary struct {
-	DeploymentName string                      `json:"deploymentName"`
-	Containers     map[string]containerSummary `json:"containers"`
+type workloadSummary struct {
+	WorkloadName string                      `json:"workloadName"`
+	Kind         string                      `json:"kind"`
+	Containers   map[string]containerSummary `json:"containers"`
 }
 
 type containerSummary struct {
@@ -67,8 +69,23 @@ type Summarizer struct {
 	// cached list of vpas
 	vpas []vpav1.VerticalPodAutoscaler
 
-	// cached map of deploy/vpa name -> deployment
-	deploymentForVPANamed map[string]*appsv1.Deployment
+	// cached map of workload/vpa name -> workload
+	workloadForVPANamed map[string]*workload
+}
+
+// workload represents any pod generating workload, that
+// can be watched by a VPA
+// (ie. deployment, stateful set, daemonset)
+type workload struct {
+	metav1.TypeMeta
+	metav1.ObjectMeta
+	containers []corev1.Container
+}
+
+// VPAName produces a VPA name base on the workload name and kind
+// <workload-name>-<workload-kind>
+func (w workload) VPAName() string {
+	return fmt.Sprintf("%s-%s", w.Name, strings.ToLower(w.TypeMeta.Kind))
 }
 
 // NewSummarizer returns a Summarizer for all goldilocks managed VPAs in all Namespaces
@@ -104,13 +121,13 @@ func (s Summarizer) GetSummary() (Summary, error) {
 	// then add that namespace by default to the blank summary
 	if s.namespace != namespaceAllNamespaces {
 		summary.Namespaces[s.namespace] = namespaceSummary{
-			Namespace:   s.namespace,
-			Deployments: map[string]deploymentSummary{},
+			Namespace: s.namespace,
+			Workloads: map[string]workloadSummary{},
 		}
 	}
 
 	// cached vpas and deployments
-	if s.vpas == nil || s.deploymentForVPANamed == nil {
+	if s.vpas == nil || s.workloadForVPANamed == nil {
 		err := s.Update()
 		if err != nil {
 			return summary, err
@@ -132,48 +149,48 @@ func (s Summarizer) GetSummary() (Summary, error) {
 			nsSummary = val
 		} else {
 			nsSummary = namespaceSummary{
-				Namespace:   namespace,
-				Deployments: map[string]deploymentSummary{},
+				Namespace: namespace,
+				Workloads: map[string]workloadSummary{},
 			}
 			summary.Namespaces[namespace] = nsSummary
 		}
 
-		// VPA.Name := Deployment.Name, as that's how goldilocks works
-		dSummary := deploymentSummary{
-			DeploymentName: vpa.Name,
-			Containers:     map[string]containerSummary{},
+		dSummary := workloadSummary{
+			WorkloadName: vpa.Name,
+			Kind:         vpa.Spec.TargetRef.Kind,
+			Containers:   map[string]containerSummary{},
 		}
 
-		deployment, ok := s.deploymentForVPANamed[vpa.Name]
+		workload, ok := s.workloadForVPANamed[vpa.Name]
 		if !ok {
-			klog.Errorf("no matching Deployment found for VPA/%s", vpa.Name)
+			klog.Errorf("no matching workload found for VPA/%s", vpa.Name)
 			continue
 		}
 
 		if vpa.Status.Recommendation == nil {
-			klog.V(2).Infof("Empty status on %v", dSummary.DeploymentName)
+			klog.V(2).Infof("Empty status on %v", dSummary.WorkloadName)
 			continue
 		}
 		if len(vpa.Status.Recommendation.ContainerRecommendations) <= 0 {
-			klog.V(2).Infof("No recommendations found in the %v vpa.", dSummary.DeploymentName)
+			klog.V(2).Infof("No recommendations found in the %v vpa.", dSummary.WorkloadName)
 			continue
 		}
 
 		// get the full set of excluded containers for this Deployment
 		excludedContainers := sets.NewString().Union(s.excludedContainers)
-		if val, exists := deployment.GetAnnotations()[utils.DeploymentExcludeContainersAnnotation]; exists {
+		if val, exists := workload.GetAnnotations()[utils.DeploymentExcludeContainersAnnotation]; exists {
 			excludedContainers.Insert(strings.Split(val, ",")...)
 		}
 
 	CONTAINER_REC_LOOP:
 		for _, containerRecommendation := range vpa.Status.Recommendation.ContainerRecommendations {
 			if excludedContainers.Has(containerRecommendation.ContainerName) {
-				klog.V(2).Infof("Excluding container Deployment/%s/%s", dSummary.DeploymentName, containerRecommendation.ContainerName)
+				klog.V(2).Infof("Excluding container Deployment/%s/%s", dSummary.WorkloadName, containerRecommendation.ContainerName)
 				continue CONTAINER_REC_LOOP
 			}
 
 			var cSummary containerSummary
-			for _, c := range deployment.Spec.Template.Spec.Containers {
+			for _, c := range workload.containers {
 				// find the matching container on the deployment
 				if c.Name == containerRecommendation.ContainerName {
 					cSummary = containerSummary{
@@ -185,7 +202,7 @@ func (s Summarizer) GetSummary() (Summary, error) {
 						Limits:         utils.FormatResourceList(c.Resources.Limits),
 						Requests:       utils.FormatResourceList(c.Resources.Requests),
 					}
-					klog.V(6).Infof("Resources for Deployment/%s/%s: Requests: %v Limits: %v", dSummary.DeploymentName, c.Name, cSummary.Requests, cSummary.Limits)
+					klog.V(6).Infof("Resources for Deployment/%s/%s: Requests: %v Limits: %v", dSummary.WorkloadName, c.Name, cSummary.Requests, cSummary.Limits)
 					dSummary.Containers[cSummary.ContainerName] = cSummary
 					continue CONTAINER_REC_LOOP
 				}
@@ -193,7 +210,7 @@ func (s Summarizer) GetSummary() (Summary, error) {
 		}
 
 		// update summary maps
-		nsSummary.Deployments[dSummary.DeploymentName] = dSummary
+		nsSummary.Workloads[dSummary.WorkloadName] = dSummary
 		summary.Namespaces[nsSummary.Namespace] = nsSummary
 	}
 
@@ -208,7 +225,7 @@ func (s *Summarizer) Update() error {
 		return err
 	}
 
-	err = s.updateDeployments()
+	err = s.updateWorkloads()
 	if err != nil {
 		klog.Error(err.Error())
 		return err
@@ -248,23 +265,23 @@ func getVPAListOptionsForLabels(vpaLabels map[string]string) metav1.ListOptions 
 	}
 }
 
-func (s *Summarizer) updateDeployments() error {
+func (s *Summarizer) updateWorkloads() error {
 	nsLog := s.namespace
 	if s.namespace == namespaceAllNamespaces {
 		nsLog = "all namespaces"
 	}
-	klog.V(3).Infof("Looking for Deployments in %s", nsLog)
-	deployments, err := s.listDeployments(metav1.ListOptions{})
+	klog.V(3).Infof("Looking for workloads in %s", nsLog)
+	workloads, err := s.listWorkloads(metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
-	klog.V(10).Infof("Found deployments: %v", deployments)
+	klog.V(10).Infof("Found workloads: %v", workloads)
 
-	// map the deployment.name -> &deployment for easy vpa lookup (since vpa.Name == deployment.Name for matching vpas/deployments)
-	s.deploymentForVPANamed = map[string]*appsv1.Deployment{}
-	for _, d := range deployments {
+	// map the workload.vpaName -> &workload for easy vpa lookup
+	s.workloadForVPANamed = map[string]*workload{}
+	for _, d := range workloads {
 		d := d
-		s.deploymentForVPANamed[d.Name] = &d
+		s.workloadForVPANamed[d.VPAName()] = &d
 	}
 
 	return nil
@@ -277,4 +294,28 @@ func (s Summarizer) listDeployments(listOptions metav1.ListOptions) ([]appsv1.De
 	}
 
 	return deployments.Items, nil
+}
+
+func (s Summarizer) listWorkloads(listOptions metav1.ListOptions) ([]workload, error) {
+	workloadLen := 0
+	deployments, err := s.listDeployments(listOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	workloadLen += len(deployments)
+
+	workloads := make([]workload, 0, workloadLen)
+
+	for _, deployment := range deployments {
+		workloads = append(
+			workloads,
+			workload{
+				TypeMeta:   deployment.TypeMeta,
+				ObjectMeta: deployment.ObjectMeta,
+				containers: deployment.Spec.Template.Spec.Containers,
+			})
+	}
+
+	return workloads, nil
 }
