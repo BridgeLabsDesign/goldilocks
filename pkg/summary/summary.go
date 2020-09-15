@@ -287,15 +287,6 @@ func (s *Summarizer) updateWorkloads() error {
 	return nil
 }
 
-func (s Summarizer) listDeployments(listOptions metav1.ListOptions) ([]appsv1.Deployment, error) {
-	deployments, err := s.kubeClient.Client.AppsV1().Deployments(s.namespace).List(context.TODO(), listOptions)
-	if err != nil {
-		return nil, err
-	}
-
-	return deployments.Items, nil
-}
-
 func (s Summarizer) listWorkloads(listOptions metav1.ListOptions) ([]workload, error) {
 	workloadLen := 0
 	deployments, err := s.listDeployments(listOptions)
@@ -304,6 +295,13 @@ func (s Summarizer) listWorkloads(listOptions metav1.ListOptions) ([]workload, e
 	}
 
 	workloadLen += len(deployments)
+
+	statefulSets, err := s.listStatefulSets(listOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	workloadLen += len(statefulSets)
 
 	workloads := make([]workload, 0, workloadLen)
 
@@ -317,5 +315,33 @@ func (s Summarizer) listWorkloads(listOptions metav1.ListOptions) ([]workload, e
 			})
 	}
 
+	for _, statefulset := range statefulSets {
+		workloads = append(
+			workloads,
+			workload{
+				TypeMeta:   statefulset.TypeMeta,
+				ObjectMeta: statefulset.ObjectMeta,
+				containers: statefulset.Spec.Template.Spec.Containers,
+			})
+	}
+
 	return workloads, nil
+}
+
+func (s Summarizer) listDeployments(listOptions metav1.ListOptions) ([]appsv1.Deployment, error) {
+	deployments, err := s.kubeClient.Client.AppsV1().Deployments(s.namespace).List(context.TODO(), listOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	return deployments.Items, nil
+}
+
+func (s Summarizer) listStatefulSets(listOptions metav1.ListOptions) ([]appsv1.StatefulSet, error) {
+	statefulsets, err := s.kubeClient.Client.AppsV1().StatefulSets(s.namespace).List(context.TODO(), listOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	return statefulsets.Items, nil
 }
