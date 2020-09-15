@@ -28,6 +28,22 @@ func defaultOptions() *options {
 	}
 }
 
+// WithKubeClient is an option for setting the the client used to
+// interact with kubernetes API server
+func WithKubeClient(c *kube.ClientInstance) Option {
+	return func(opts *options) {
+		opts.kubeClient = c
+	}
+}
+
+// WithVPAClient is an option for setting the the client used to
+// interact with VPA resources through the kubernetes API server
+func WithVPAClient(c *kube.VPAClientInstance) Option {
+	return func(opts *options) {
+		opts.vpaClient = c
+	}
+}
+
 // ForNamespace is an Option for limiting the summary to a single namespace
 func ForNamespace(namespace string) Option {
 	return func(opts *options) {
