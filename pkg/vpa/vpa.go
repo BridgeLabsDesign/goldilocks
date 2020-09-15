@@ -248,19 +248,36 @@ func (r Reconciler) listWorkloads(namespace string) ([]workload, error) {
 	workloads := make([]workload, 0, workloadLen)
 
 	for _, deployment := range deployments {
+		typeMeta := deployment.TypeMeta
+
+		if typeMeta.Kind == "" {
+			typeMeta = metav1.TypeMeta{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+			}
+		}
+
 		workloads = append(
 			workloads,
 			workload{
-				TypeMeta:   deployment.TypeMeta,
+				TypeMeta:   typeMeta,
 				ObjectMeta: deployment.ObjectMeta,
 			})
 	}
 
 	for _, statefulset := range statefulSets {
+		typeMeta := statefulset.TypeMeta
+
+		if typeMeta.Kind == "" {
+			typeMeta = metav1.TypeMeta{
+				APIVersion: "apps/v1",
+				Kind:       "StatefulSet",
+			}
+		}
 		workloads = append(
 			workloads,
 			workload{
-				TypeMeta:   statefulset.TypeMeta,
+				TypeMeta:   typeMeta,
 				ObjectMeta: statefulset.ObjectMeta,
 			})
 	}
