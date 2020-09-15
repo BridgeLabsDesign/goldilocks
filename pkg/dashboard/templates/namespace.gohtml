@@ -2,13 +2,13 @@
 <div class="card namespace">
   <h3>Namespace: <strong>{{ $.Namespace }}</strong></h3>
   <div class="expandable-table">
-    {{ range $deployment := $.Deployments }}
+    {{ range $workload := $.Workloads }}
       <div class="resource-info">
         <div class="name"><span class="caret-expander"></span>
-          <span class="controller-type">Deployment:</span>
-          <strong>{{ $deployment.DeploymentName }}</strong>
+          <span class="controller-type">{{$workload.Kind}}:</span>
+          <strong>{{ $workload.WorkloadName }}</strong>
         </div>
-        {{ range $cName, $cSummary := $deployment.Containers }}
+        {{ range $cName, $cSummary := $workload.Containers }}
           {{ template "container" $cSummary }}
         {{ end }}
         </div>
