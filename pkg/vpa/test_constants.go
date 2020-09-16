@@ -88,12 +88,24 @@ var testDeployment = &appsv1.Deployment{
 	},
 }
 
+// A stateful set object that can be used for testing
 var testStatefulSet = &appsv1.StatefulSet{
 	ObjectMeta: metav1.ObjectMeta{
 		Name: "test-deploy",
 	},
 	TypeMeta: metav1.TypeMeta{
 		Kind:       "StatefulSet",
+		APIVersion: "apps/v1",
+	},
+}
+
+// A daemon set object that can be used for testing
+var testDaemonSet = &appsv1.DaemonSet{
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "test-deploy",
+	},
+	TypeMeta: metav1.TypeMeta{
+		Kind:       "DaemonSet",
 		APIVersion: "apps/v1",
 	},
 }
