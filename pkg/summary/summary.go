@@ -303,6 +303,13 @@ func (s Summarizer) listWorkloads(listOptions metav1.ListOptions) ([]workload, e
 
 	workloadLen += len(statefulSets)
 
+	daemonSets, err := s.listDaemonSets(listOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	workloadLen += len(daemonSets)
+
 	workloads := make([]workload, 0, workloadLen)
 
 	for _, deployment := range deployments {
@@ -343,6 +350,25 @@ func (s Summarizer) listWorkloads(listOptions metav1.ListOptions) ([]workload, e
 			})
 	}
 
+	for _, daemonset := range daemonSets {
+		typeMeta := daemonset.TypeMeta
+
+		if typeMeta.Kind == "" {
+			typeMeta = metav1.TypeMeta{
+				APIVersion: "apps/v1",
+				Kind:       "DaemonSet",
+			}
+		}
+
+		workloads = append(
+			workloads,
+			workload{
+				TypeMeta:   typeMeta,
+				ObjectMeta: daemonset.ObjectMeta,
+				containers: daemonset.Spec.Template.Spec.Containers,
+			})
+	}
+
 	return workloads, nil
 }
 
@@ -362,4 +388,13 @@ func (s Summarizer) listStatefulSets(listOptions metav1.ListOptions) ([]appsv1.S
 	}
 
 	return statefulsets.Items, nil
+}
+
+func (s Summarizer) listDaemonSets(listOptions metav1.ListOptions) ([]appsv1.DaemonSet, error) {
+	daemonsets, err := s.kubeClient.Client.AppsV1().DaemonSets(s.namespace).List(context.TODO(), listOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	return daemonsets.Items, nil
 }
