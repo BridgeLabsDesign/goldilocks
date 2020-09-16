@@ -245,6 +245,13 @@ func (r Reconciler) listWorkloads(namespace string) ([]workload, error) {
 
 	workloadLen += len(statefulSets)
 
+	daemonSets, err := r.listDaemonSets(namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	workloadLen += len(daemonSets)
+
 	workloads := make([]workload, 0, workloadLen)
 
 	for _, deployment := range deployments {
@@ -282,6 +289,23 @@ func (r Reconciler) listWorkloads(namespace string) ([]workload, error) {
 			})
 	}
 
+	for _, daemonset := range daemonSets {
+		typeMeta := daemonset.TypeMeta
+
+		if typeMeta.Kind == "" {
+			typeMeta = metav1.TypeMeta{
+				APIVersion: "apps/v1",
+				Kind:       "DaemonSet",
+			}
+		}
+		workloads = append(
+			workloads,
+			workload{
+				TypeMeta:   typeMeta,
+				ObjectMeta: daemonset.ObjectMeta,
+			})
+	}
+
 	return workloads, nil
 }
 
@@ -315,6 +339,22 @@ func (r Reconciler) listStatefulSets(namespace string) ([]appsv1.StatefulSet, er
 	}
 
 	return statefulsets.Items, nil
+}
+
+func (r Reconciler) listDaemonSets(namespace string) ([]appsv1.DaemonSet, error) {
+	daemonsets, err := r.KubeClient.Client.AppsV1().DaemonSets(namespace).List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	klog.V(2).Infof("There are %d daemonsets in Namespace/%s", len(daemonsets.Items), namespace)
+	if klog.V(9) {
+		for _, d := range daemonsets.Items {
+			klog.V(9).Infof("Found DaemonSet/%s in Namespace/%s", d.Name, namespace)
+		}
+	}
+
+	return daemonsets.Items, nil
 }
 
 func (r Reconciler) listVPAs(namespace string) ([]vpav1.VerticalPodAutoscaler, error) {

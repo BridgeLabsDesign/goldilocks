@@ -504,15 +504,19 @@ func Test_ReconcileNamespaceWithLabels(t *testing.T) {
 	_, err = KubeClient.Client.AppsV1().StatefulSets(nsName).Create(context.TODO(), testStatefulSet, metav1.CreateOptions{})
 	assert.NoError(t, err)
 
-	// This should create a 2 VPAs
+	_, err = KubeClient.Client.AppsV1().DaemonSets(nsName).Create(context.TODO(), testDaemonSet, metav1.CreateOptions{})
+	assert.NoError(t, err)
+
+	// This should create a 3 VPAs
 	err = GetInstance().ReconcileNamespace(nsLabeledTrue)
 	assert.NoError(t, err)
 
 	vpaList, err := VPAClient.Client.AutoscalingV1().VerticalPodAutoscalers(nsName).List(context.TODO(), metav1.ListOptions{})
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(vpaList.Items))
+	assert.Equal(t, 3, len(vpaList.Items))
 	assert.Equal(t, "test-deploy-deployment", vpaList.Items[0].ObjectMeta.Name)
 	assert.Equal(t, "test-deploy-statefulset", vpaList.Items[1].ObjectMeta.Name)
+	assert.Equal(t, "test-deploy-daemonset", vpaList.Items[2].ObjectMeta.Name)
 }
 
 func Test_ReconcileNamespaceDeleteDeployment(t *testing.T) {
